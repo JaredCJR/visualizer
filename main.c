@@ -153,13 +153,39 @@ void queue_str_task(const char *str, int delay)
 
 void queue_str_task1(void *pvParameters)
 {
-	queue_str_task("Hello 1\n\r", 200);
+	queue_str_task("Hello 1\n\r", 50);
 }
 
 void queue_str_task2(void *pvParameters)
 {
-	queue_str_task("Hello 2\n\r", 50);
+	queue_str_task("Hello 2\n\r", 80);
 }
+
+int fibonacci(int x) {
+ if(x<=0) return 0;
+ if(x==1) return 1;
+ return fibonacci(x-1) + fibonacci(x-2);
+ }
+
+//new task 1
+void newTask_1(void *pvParameters)
+{
+	queue_str_task("new Task 1\n\r", 100);
+ //do something
+ int i =0;
+ for(;i<1000;i++)
+	{
+	fibonacci(30);
+	}
+}
+
+//new task 2
+void newTask_2(void *pvParameters)
+{
+ 	queue_str_task("new task 2 I want a long queue to know how does these kind of thing to be done!\n\r",5 );
+
+}
+
 
 void serial_readwrite_task(void *pvParameters)
 {
@@ -248,6 +274,21 @@ int main()
 	            512 /* stack size */, NULL,
 	            tskIDLE_PRIORITY + 10, NULL);
 
+
+//new Task 1
+	xTaskCreate(newTask_1,
+	            (signed portCHAR *) "NewTask1",
+	            512 /* stack size */, NULL,
+	            tskIDLE_PRIORITY + 8, NULL);
+
+//new Task 2
+	xTaskCreate(newTask_2,
+	            (signed portCHAR *) "NewTask2",
+	            512 /* stack size */, NULL,
+	            tskIDLE_PRIORITY + 8, NULL);
+
+
+
 	/* Start running the tasks. */
 	vTaskStartScheduler();
 
@@ -260,12 +301,12 @@ void vApplicationTickHook()
 
 void vApplicationIdleHook(void)
 {
-	send_byte('i');
+	/*send_byte('i');
 	send_byte('d');
 	send_byte('l');
 	send_byte('e');
 	send_byte('\n');
-	send_byte('\r');
+	send_byte('\r');*/
 }
 
 int _snprintf_int(int num, char *buf, int buf_size)
