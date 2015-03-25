@@ -15,11 +15,12 @@ lines = log.readlines()
 
 tasks = {}
 events = []
+context_switch = []
 mutexes = {}
 all_queues = {}
 binsems = {}
 queues = {}
-
+context_switch_cost = open('context_switch_cost.txt', 'w')
 for line in lines :
 	line = line.strip()
 	inst, args = line.split(' ', 1)
@@ -36,10 +37,10 @@ for line in lines :
 		tasks[id] = task
 		
 	elif inst == 'switch' :
-		out_task, in_task, tick, tick_reload, out_minitick, in_minitick = args.split(' ')
+		out_task, in_task, tick, tick_reload, out_minitick, in_minitick = args.split(' ',5)
 		
-		out_time = (int(tick) + (int(tick_reload) - int(out_minitick)) / int(tick_reload)) / 100 * 1000;
-		in_time  = (int(tick) + (int(tick_reload) - int(in_minitick))  / int(tick_reload)) / 100 * 1000;
+		out_time = (float(tick) + (float(tick_reload) - float(out_minitick)) / float(tick_reload)) / 100 * 1000;
+		in_time  = (float(tick) + (float(tick_reload) - float(in_minitick))  / float(tick_reload)) / 100 * 1000;
 		
 		event = {}
 		event['type'] = 'task out'
@@ -54,21 +55,32 @@ for line in lines :
 		event['time'] = in_time
 		events.append(event);
 
+		container = {}
+		container['type'] = 'context switch'
+		container['cost_time'] = (in_time-out_time)
+		context_switch.append(container);
+
+		
+		context_switch_cost .write('context switch takes %f seconds\n' %
+					(container['cost_time'],))
+		
+
+
 		last_task = in_task
 
 	elif inst == 'mutex' and TRACE_MUTEX :
-		task, id = args.split(' ')
+		task, id = args.split(' ',1)
 		mutex = {}
 		mutex['type'] = 'mutex'
 		mutex['name'] = 'Mutex ' + str(len(mutexes) + 1)
-		time, mutex['id'] = args.split(' ')
+		time, mutex['id'] = args.split(' ',1)
 		mutexes[id] = mutex;
 		all_queues[id] = mutex;
 
 	elif inst == 'queue' :
 		act, args = args.split(' ', 1)
 		if act == 'create' :
-			time, id, queue_type, queue_size = args.split(' ')
+			time, id, queue_type, queue_size = args.split(' ',3)
 
 			if queue_type == '0' and TRACE_QUEUE :
 				queue = {}
@@ -86,7 +98,7 @@ for line in lines :
 				all_queues[id] = binsem;
 
 		elif act == 'send' or act == 'recv' :
-			time, task_id, id = args.split(' ')
+			time, task_id, id = args.split(' ',2)
 			if id in all_queues and int(time) > 0 :
 				queue = all_queues[id]
 
@@ -123,7 +135,7 @@ for line in lines :
 				events.append(event);
 		
 		elif act == 'block' :
-			time, task_id, id = args.split(' ')
+			time, task_id, id = args.split(' ',2)
 			if id in all_queues and all_queues[id]['type'] == 'binary semaphore':
 				event = {}
 				event['target'] = id
@@ -162,7 +174,7 @@ for line in lines :
 
 			events.append(event)
 			tasks[int_num]['created'] = True if dir == 'in' else False
-
+context_switch_cost.close()
 log.close()
 
 grasp = open('sched.grasp', 'w')
