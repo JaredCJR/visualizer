@@ -26,108 +26,116 @@ volatile xQueueHandle serial_rx_queue = NULL;
 
 /* Queue structure used for passing messages. */
 typedef struct {
-	char str[100];
+    char str[100];
 } serial_str_msg;
 
 /* Queue structure used for passing characters. */
 typedef struct {
-	char ch;
+    char ch;
 } serial_ch_msg;
 
 /* IRQ handler to handle USART2 interruptss (both transmit and
  * receive interrupts). */
 void USART2_IRQHandler()
 {
-	static signed portBASE_TYPE xHigherPriorityTaskWoken;
-	serial_ch_msg rx_msg;
+    static signed portBASE_TYPE xHigherPriorityTaskWoken;
+    serial_ch_msg rx_msg;
 
-	/* If this interrupt is for a transmit... */
-	if (USART_GetITStatus(USART2, USART_IT_TXE) != RESET) {
-		/* "give" the serial_tx_wait_sem semaphore to notfiy processes
-		 * that the buffer has a spot free for the next byte.
-		 */
-		xSemaphoreGiveFromISR(serial_tx_wait_sem,
-		                      &xHigherPriorityTaskWoken);
+    trace_interrupt_in();
 
-		/* Diables the transmit interrupt. */
-		USART_ITConfig(USART2, USART_IT_TXE, DISABLE);
-		/* If this interrupt is for a receive... */
-	} else if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET) {
-		/* Receive the byte from the buffer. */
-		rx_msg.ch = USART_ReceiveData(USART2);
+    /* If this interrupt is for a transmit... */
+    if (USART_GetITStatus(USART2, USART_IT_TXE) != RESET) {
+	/* "give" the serial_tx_wait_sem semaphore to notfiy processes
+	 * that the buffer has a spot free for the next byte.
+	 */
+	xSemaphoreGiveFromISR(serial_tx_wait_sem,
+		&xHigherPriorityTaskWoken);
 
-		/* Queue the received byte. */
-		if (!xQueueSendToBackFromISR(serial_rx_queue, &rx_msg,
-		                             &xHigherPriorityTaskWoken)) {
-			/* If there was an error queueing the received byte,
-			 * freeze. */
-			while (1);
-		}
-	} else {
-		/* Only transmit and receive interrupts should be enabled.
-		 * If this is another type of interrupt, freeze.
-		 */
-		while (1);
+
+	/* Diables the transmit interrupt. */
+	USART_ITConfig(USART2, USART_IT_TXE, DISABLE);
+	/* If this interrupt is for a receive... */
+    } else if (USART_GetITStatus(USART2, USART_IT_RXNE) != RESET) {
+	/* Receive the byte from the buffer. */
+	rx_msg.ch = USART_ReceiveData(USART2);
+
+
+	/* Queue the received byte. */
+	if (!xQueueSendToBackFromISR(serial_rx_queue, &rx_msg,
+		    &xHigherPriorityTaskWoken)) {
+	    /* If there was an error queueing the received byte,
+	     * freeze. */
+	    while (1);
 	}
+    } else {
+	/* Only transmit and receive interrupts should be enabled.
+	 * If this is another type of interrupt, freeze.
+	 */
+	while (1);
+    }
 
-	if (xHigherPriorityTaskWoken)
-		taskYIELD();
+    if (xHigherPriorityTaskWoken)
+    {
+	taskYIELD();
+    }
+
+	trace_interrupt_out();
 }
 
 void send_byte(char ch)
 {
-	/* Wait until the RS232 port can receive another byte (this semaphore
-	 * is "given" by the RS232 port interrupt when the buffer has room for
-	 * another byte.
-	 */
-	while (!xSemaphoreTake(serial_tx_wait_sem, portMAX_DELAY));
+    /* Wait until the RS232 port can receive another byte (this semaphore
+     * is "given" by the RS232 port interrupt when the buffer has room for
+     * another byte.
+     */
+    while (!xSemaphoreTake(serial_tx_wait_sem, portMAX_DELAY));
 
-	/* Send the byte and enable the transmit interrupt (it is disabled by
-	 * the interrupt).
-	 */
-	USART_SendData(USART2, ch);
-	USART_ITConfig(USART2, USART_IT_TXE, ENABLE);
+    /* Send the byte and enable the transmit interrupt (it is disabled by
+     * the interrupt).
+     */
+    USART_SendData(USART2, ch);
+    USART_ITConfig(USART2, USART_IT_TXE, ENABLE);
 }
 
 char receive_byte()
 {
-	serial_ch_msg msg;
+    serial_ch_msg msg;
 
-	/* Wait for a byte to be queued by the receive interrupts handler. */
-	while (!xQueueReceive(serial_rx_queue, &msg, portMAX_DELAY));
+    /* Wait for a byte to be queued by the receive interrupts handler. */
+    while (!xQueueReceive(serial_rx_queue, &msg, portMAX_DELAY));
 
-	return msg.ch;
+    return msg.ch;
 }
 
 void led_flash_task(void *pvParameters)
 {
-	while (1) {
-		/* Toggle the LED. */
-		GPIOC->ODR = GPIOC->ODR ^ 0x00001000;
+    while (1) {
+	/* Toggle the LED. */
+	GPIOC->ODR = GPIOC->ODR ^ 0x00001000;
 
-		/* Wait one second. */
-		vTaskDelay(100);
-	}
+	/* Wait one second. */
+	vTaskDelay(100);
+    }
 }
 
 void rs232_xmit_msg_task(void *pvParameters)
 {
-	serial_str_msg msg;
-	int curr_char;
+    serial_str_msg msg;
+    int curr_char;
 
-	while (1) {
-		/* Read from the queue.  Keep trying until a message is
-		 * received.  This will block for a period of time (specified
-		 * by portMAX_DELAY). */
-		while (!xQueueReceive(serial_str_queue, &msg, portMAX_DELAY));
+    while (1) {
+	/* Read from the queue.  Keep trying until a message is
+	 * received.  This will block for a period of time (specified
+	 * by portMAX_DELAY). */
+	while (!xQueueReceive(serial_str_queue, &msg, portMAX_DELAY));
 
-		/* Write each character of the message to the RS232 port. */
-		curr_char = 0;
-		while (msg.str[curr_char] != '\0') {
-			send_byte(msg.str[curr_char]);
-			curr_char++;
-		}
+	/* Write each character of the message to the RS232 port. */
+	curr_char = 0;
+	while (msg.str[curr_char] != '\0') {
+	    send_byte(msg.str[curr_char]);
+	    curr_char++;
 	}
+    }
 }
 
 /* Repeatedly queues a string to be sent to the RS232.
@@ -136,163 +144,145 @@ void rs232_xmit_msg_task(void *pvParameters)
  */
 void queue_str_task(const char *str, int delay)
 {
-	serial_str_msg msg;
+    serial_str_msg msg;
 
-	/* Prepare the message to be queued. */
-	strcpy(msg.str, str);
+    /* Prepare the message to be queued. */
+    strcpy(msg.str, str);
 
-	while (1) {
-		/* Post the message.  Keep on trying until it is successful. */
-		while (!xQueueSendToBack(serial_str_queue, &msg,
-		                         portMAX_DELAY));
+    while (1) {
+	/* Post the message.  Keep on trying until it is successful. */
+	while (!xQueueSendToBack(serial_str_queue, &msg,
+		    portMAX_DELAY));
 
-		/* Wait. */
-		vTaskDelay(delay);
-	}
+	/* Wait. */
+	vTaskDelay(delay);
+    }
 }
 
 void queue_str_task1(void *pvParameters)
 {
-	queue_str_task("Hello 1\n\r", 50);
+    queue_str_task("Hello 1\n\r", 300);
 }
 
 void queue_str_task2(void *pvParameters)
 {
-	queue_str_task("Hello 2\n\r", 80);
+    queue_str_task("Hello 2\n\r", 300);
 }
 
-int fibonacci(int x) {
- if(x<=0) return 0;
- if(x==1) return 1;
- return fibonacci(x-1) + fibonacci(x-2);
- }
 
 //new task 1
 void newTask_1(void *pvParameters)
 {
-	queue_str_task("new Task 1\n\r", 100);
- //do something
- int i =0;
- for(;i<1000;i++)
-	{
-	fibonacci(30);
-	}
+    queue_str_task("test\n\r",400);
 }
 
 //new task 2
 void newTask_2(void *pvParameters)
 {
- 	queue_str_task("new task 2 I want a long queue to know how does these kind of thing to be done!\n\r",5 );
+    queue_str_task("new task 2!\n\r",450 );
 
 }
 
 
 void serial_readwrite_task(void *pvParameters)
 {
-	serial_str_msg msg;
-	char ch;
-	int curr_char;
-	int done;
+    serial_str_msg msg;
+    char ch;
+    int curr_char;
+    int done;
 
-	/* Prepare the response message to be queued. */
-	strcpy(msg.str, "Got:");
+    /* Prepare the response message to be queued. */
+    strcpy(msg.str, "Got:");
 
-	while (1) {
-		curr_char = 4;
-		done = 0;
-		do {
-			/* Receive a byte from the RS232 port (this call will
-			 * block). */
-			ch = receive_byte();
+    while (1) {
+	curr_char = 4;
+	done = 0;
+	do {
+	    /* Receive a byte from the RS232 port (this call will
+	     * block). */
+	    ch = receive_byte();
 
-			/* If the byte is an end-of-line type character, then
-			 * finish the string and inidcate we are done.
-			 */
-			if ((ch == '\r') || (ch == '\n')) {
-				msg.str[curr_char] = '\n';
-				msg.str[curr_char + 1] = '\0';
-				done = -1;
-				/* Otherwise, add the character to the
-				 * response string. */
-			} else {
-				msg.str[curr_char++] = ch;
-			}
-		} while (!done);
+	    /* If the byte is an end-of-line type character, then
+	     * finish the string and inidcate we are done.
+	     */
+	    if ((ch == '\r') || (ch == '\n')) {
+		msg.str[curr_char] = '\n';
+		msg.str[curr_char + 1] = '\0';
+		done = -1;
+		/* Otherwise, add the character to the
+		 * response string. */
+	    } else {
+		msg.str[curr_char++] = ch;
+	    }
+	} while (!done);
 
-		/* Once we are done building the response string, queue the
-		 * response to be sent to the RS232 port.
-		 */
-		while (!xQueueSendToBack(serial_str_queue, &msg,
-		                         portMAX_DELAY));
-	}
+	/* Once we are done building the response string, queue the
+	 * response to be sent to the RS232 port.
+	 */
+	while (!xQueueSendToBack(serial_str_queue, &msg,
+		    portMAX_DELAY));
+    }
 }
 
 int main()
 {
-	logfile = open("log", 4);
+    logfile = open("log", 4);
 
-	init_led();
+    init_led();
 
-	init_button();
-	enable_button_interrupts();
+    init_button();
+    enable_button_interrupts();
 
-	init_rs232();
-	enable_rs232_interrupts();
-	enable_rs232();
+    init_rs232();
+    enable_rs232_interrupts();
+    enable_rs232();
 
-	/* Create the queue used by the serial task.  Messages for write to
-	 * the RS232. */
-	serial_str_queue = xQueueCreate(10, sizeof(serial_str_msg));
-	vSemaphoreCreateBinary(serial_tx_wait_sem);
-	serial_rx_queue = xQueueCreate(1, sizeof(serial_ch_msg));
+    /* Create the queue used by the serial task.  Messages for write to
+     * the RS232. */
+    serial_str_queue = xQueueCreate(10, sizeof(serial_str_msg));
+    vSemaphoreCreateBinary(serial_tx_wait_sem);
+    serial_rx_queue = xQueueCreate(1, sizeof(serial_ch_msg));
 
-	/* Create a task to flash the LED. */
-	xTaskCreate(led_flash_task,
-	            (signed portCHAR *) "LED Flash",
-	            512 /* stack size */, NULL,
-	            tskIDLE_PRIORITY + 5, NULL);
+    /* Create tasks to queue a string to be written to the RS232 port. */
+    xTaskCreate(queue_str_task1,
+	    (signed portCHAR *) "Serial Write 1",
+	    512 /* stack size */, NULL,
+	    tskIDLE_PRIORITY + 10, NULL);
+    xTaskCreate(queue_str_task2,
+	    (signed portCHAR *) "Serial Write 2",
+	    512 /* stack size */,
+	    NULL, tskIDLE_PRIORITY + 10, NULL);
 
-	/* Create tasks to queue a string to be written to the RS232 port. */
-	xTaskCreate(queue_str_task1,
-	            (signed portCHAR *) "Serial Write 1",
-	            512 /* stack size */, NULL,
-	            tskIDLE_PRIORITY + 10, NULL);
-	xTaskCreate(queue_str_task2,
-	            (signed portCHAR *) "Serial Write 2",
-	            512 /* stack size */,
-	            NULL, tskIDLE_PRIORITY + 10, NULL);
+    /* Create a task to write messages from the queue to the RS232 port. */
+    xTaskCreate(rs232_xmit_msg_task,
+	    (signed portCHAR *) "Serial Xmit Str",
+	    512 /* stack size */, NULL, tskIDLE_PRIORITY + 2, NULL);
 
-	/* Create a task to write messages from the queue to the RS232 port. */
-	xTaskCreate(rs232_xmit_msg_task,
-	            (signed portCHAR *) "Serial Xmit Str",
-	            512 /* stack size */, NULL, tskIDLE_PRIORITY + 2, NULL);
-
-	/* Create a task to receive characters from the RS232 port and echo
-	 * them back to the RS232 port. */
-	xTaskCreate(serial_readwrite_task,
-	            (signed portCHAR *) "Serial Read/Write",
-	            512 /* stack size */, NULL,
-	            tskIDLE_PRIORITY + 10, NULL);
+    /* Create a task to receive characters from the RS232 port and echo
+     * them back to the RS232 port. */
+    xTaskCreate(serial_readwrite_task,
+	    (signed portCHAR *) "Serial Read/Write",
+	    512 /* stack size */, NULL,
+	    tskIDLE_PRIORITY + 10, NULL);
 
 
-//new Task 1
-	xTaskCreate(newTask_1,
-	            (signed portCHAR *) "NewTask1",
-	            512 /* stack size */, NULL,
-	            tskIDLE_PRIORITY + 8, NULL);
+    //new Task 1
+   xTaskCreate(newTask_1,
+	    (signed portCHAR *) "NewTask1",
+	    512 /* stack size */, NULL,
+	    tskIDLE_PRIORITY + 7, NULL);
 
-//new Task 2
-	xTaskCreate(newTask_2,
-	            (signed portCHAR *) "NewTask2",
-	            512 /* stack size */, NULL,
-	            tskIDLE_PRIORITY + 8, NULL);
+ //new Task 2
+    xTaskCreate(newTask_2,
+	    (signed portCHAR *) "NewTask2",
+	    512 , NULL,
+	    tskIDLE_PRIORITY + 8, NULL);
+   
 
+    /* Start running the tasks. */
+    vTaskStartScheduler();
 
-
-	/* Start running the tasks. */
-	vTaskStartScheduler();
-
-	return 0;
+    return 0;
 }
 
 void vApplicationTickHook()
@@ -301,229 +291,223 @@ void vApplicationTickHook()
 
 void vApplicationIdleHook(void)
 {
-	/*send_byte('i');
-	send_byte('d');
-	send_byte('l');
-	send_byte('e');
-	send_byte('\n');
-	send_byte('\r');*/
 }
 
 int _snprintf_int(int num, char *buf, int buf_size)
 {
-	int len = 1;
-	char *p;
-	int i = num < 0 ? -num : num;
+    int len = 1;
+    char *p;
+    int i = num < 0 ? -num : num;
 
-	for (; i >= 10; i /= 10, len++);
+    for (; i >= 10; i /= 10, len++);
 
-	if (num < 0)
-		len++;
+    if (num < 0)
+	len++;
 
-	i = num;
-	p = buf + len - 1;
-	do {
-		if (p < buf + buf_size)
-			*p-- = '0' + i % 10;
-		i /= 10;
-	} while (i != 0);
+    i = num;
+    p = buf + len - 1;
+    do {
+	if (p < buf + buf_size)
+	    *p-- = '0' + i % 10;
+	i /= 10;
+    } while (i != 0);
 
-	if (num < 0)
-		*p = '-';
+    if (num < 0)
+	*p = '-';
 
-	return len < buf_size ? len : buf_size;
+    return len < buf_size ? len : buf_size;
 }
 
 unsigned int get_reload()
 {
-	return *(uint32_t *) 0xE000E014;
+    return *(uint32_t *) 0xE000E014;
 }
 
 unsigned int get_current()
 {
-	return *(uint32_t *) 0xE000E018;
+    return *(uint32_t *) 0xE000E018;
 }
 
 unsigned int get_time()
 {
-	static unsigned int const *reload = (void *) 0xE000E014;
-	static unsigned int const *current = (void *) 0xE000E018;
-	static const unsigned int scale = 1000000 / configTICK_RATE_HZ;
-					/* microsecond */
+    static unsigned int const *reload = (void *) 0xE000E014;
+    static unsigned int const *current = (void *) 0xE000E018;
+    static const unsigned int scale = 1000000 / configTICK_RATE_HZ;
+    /* microsecond */
 
-	return xTaskGetTickCount() * scale +
-	       (*reload - *current) / (*reload / scale);
+    return xTaskGetTickCount() * scale +
+	(*reload - *current) / (*reload / scale);
 }
 
 int get_interrupt_priority(int interrupt)
 {
-	if (interrupt < 240)
-		return NVIC_INTERRUPTx_PRIORITY[interrupt];
-	return -1;
+    if (interrupt < 240)
+	return NVIC_INTERRUPTx_PRIORITY[interrupt];
+    return -1;
 }
 
 int snprintf(char *buf, size_t size, const char *format, ...)
 {
-	va_list ap;
-	char *dest = buf;
-	char *last = buf + size;
-	char ch;
+    va_list ap;
+    char *dest = buf;
+    char *last = buf + size;
+    char ch;
 
-	va_start(ap, format);
-	for (ch = *format++; dest < last && ch; ch = *format++) {
-		if (ch == '%') {
-			ch = *format++;
-			switch (ch) {
-			case 's' : {
-					char *str = va_arg(ap, char*);
-					/* strncpy */
-					while (dest < last) {
-						if ((*dest = *str++))
-							dest++;
-						else
-							break;
-					}
-				}
-				break;
-			case 'd' : {
-					int num = va_arg(ap, int);
-					dest += _snprintf_int(num, dest,
-					                      last - dest);
-				}
-				break;
-			case '%' :
-				*dest++ = ch;
-				break;
-			default :
-				return -1;
-			}
-		} else {
-			*dest++ = ch;
-		}
+    va_start(ap, format);
+    for (ch = *format++; dest < last && ch; ch = *format++) {
+	if (ch == '%') {
+	    ch = *format++;
+	    switch (ch) {
+		case 's' : {
+			       char *str = va_arg(ap, char*);
+			       /* strncpy */
+			       while (dest < last) {
+				   if ((*dest = *str++))
+				       dest++;
+				   else
+				       break;
+			       }
+			   }
+			   break;
+		case 'd' : {
+			       int num = va_arg(ap, int);
+			       dest += _snprintf_int(num, dest,
+				       last - dest);
+			   }
+			   break;
+		case '%' :
+			   *dest++ = ch;
+			   break;
+		default :
+			   return -1;
+	    }
+	} else {
+	    *dest++ = ch;
 	}
-	va_end(ap);
+    }
+    va_end(ap);
 
-	if (dest < last)
-		*dest = 0;
-	else
-		*--dest = 0;
+    if (dest < last)
+	*dest = 0;
+    else
+	*--dest = 0;
 
-	return dest - buf;
+    return dest - buf;
 }
 
 void trace_task_create(void *task,
-                       const char *task_name,
-                       unsigned int priority)
+	const char *task_name,
+	unsigned int priority)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "task %d %d %s\n", task, priority,
-	                   task_name);
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "task %d %d %s\n", task, priority,
+	    task_name);
+    write(logfile, buf, len);
 }
 
 void trace_task_switch(void *prev_task,
-                       unsigned int prev_tick,
-                       void *curr_task)
+	unsigned int prev_tick,
+	void *curr_task)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "switch %d %d %d %d %d %d\n",
-	                   prev_task, curr_task,
-	                   xTaskGetTickCount(), get_reload(),
-	                   prev_tick, get_current());
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "switch %d %d %d %d %d %d\n",
+	    prev_task, curr_task,
+	    xTaskGetTickCount(), get_reload(),
+	    prev_tick, get_current());
+    write(logfile, buf, len);
 }
 
 void trace_create_mutex(void *mutex)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "mutex %d %d\n", get_time(), mutex);
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "mutex %d %d\n", get_time(), mutex);
+    write(logfile, buf, len);
 }
 
 void trace_queue_create(void *queue,
-                        int queue_type,
-                        unsigned int queue_size)
+	int queue_type,
+	unsigned int queue_size)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "queue create %d %d %d %d\n",
-	                   get_time(), queue, queue_type, queue_size);
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "queue create %d %d %d %d\n",
+	    get_time(), queue, queue_type, queue_size);
+    write(logfile, buf, len);
 }
 
 void trace_queue_send(void *task,
-                      void *queue)
+	void *queue)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "queue send %d %d %d\n",
-	                   get_time(), task, queue);
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "queue send %d %d %d\n",
+	    get_time(), task, queue);
+    write(logfile, buf, len);
 }
 
 void trace_queue_recv(void *task,
-                      void *queue)
+	void *queue)
 {
-	char  buf[128];
-	int len = snprintf(buf, 128, "queue recv %d %d %d\n",
-	                   get_time(), task, queue);
-	write(logfile, buf, len);
+    char  buf[128];
+    int len = snprintf(buf, 128, "queue recv %d %d %d\n",
+	    get_time(), task, queue);
+    write(logfile, buf, len);
 }
 
 void trace_queue_block(void *task,
-                       void *queue)
+	void *queue)
 {
-	char buf[128];
-	int len = snprintf(buf, 128, "queue block %d %d %d\n",
-	                   get_time(), task, queue);
-	write(logfile, buf, len);
+    char buf[128];
+    int len = snprintf(buf, 128, "queue block %d %d %d\n",
+	    get_time(), task, queue);
+    write(logfile, buf, len);
 }
 
 void trace_interrupt_in()
 {
-	char buf[128];
-	int number = get_current_interrupt_number();
-	int len = snprintf(buf, 128, "interrupt in %d %d %d\n", get_time(),
-	                   number, get_interrupt_priority(number));
-	write(logfile, buf, len);
+    char buf[128];
+    int number = get_current_interrupt_number();
+    int len = snprintf(buf, 128, "interrupt in %d %d %d\n", get_time(),
+	    number, get_interrupt_priority(number));
+    write(logfile, buf, len);
 }
 
 void trace_interrupt_out()
 {
-	char buf[128];
-	int number = get_current_interrupt_number();
-	int len = snprintf(buf, 128, "interrupt out %d %d\n",
-	                   get_time(), number);
-	write(logfile, buf, len);
+    char buf[128];
+    int number = get_current_interrupt_number();
+    int len = snprintf(buf, 128, "interrupt out %d %d %d\n",
+	    get_time(), number, get_interrupt_priority(number));
+    write(logfile, buf, len);
 }
 
 int syscall(int number, ...)
 {
-	asm(
+    asm(
 	    "bkpt 0xAB \n"
 	    "bx   lr   \n"
-	);
+       );
 }
 
 int open(const char *pathname, int flags)
 {
-	int argv[] = { (int) pathname, flags, strlen(pathname) };
-	return syscall(0x01, argv);
+    int argv[] = { (int) pathname, flags, strlen(pathname) };
+    return syscall(0x01, argv);
 }
 
 int close(int fildes)
 {
-	return syscall(0x02, &fildes);
+    return syscall(0x02, &fildes);
 }
 
 size_t write(int fildes, const void *buf, size_t nbyte)
 {
-	int argv[] = { fildes, (int) buf, nbyte };
-	return nbyte - syscall(0x05, argv);
+    int argv[] = { fildes, (int) buf, nbyte };
+    return nbyte - syscall(0x05, argv);
 }
 
 int get_current_interrupt_number()
 {
-	asm(
+    asm(
 	    "mrs r0, ipsr\n"
 	    "bx  lr     \n"
-	);
+       );
 }
