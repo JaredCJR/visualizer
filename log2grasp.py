@@ -60,8 +60,7 @@ for line in lines :
 		context_switch.append(container);
 
 		
-		context_switch_cost .write('context switch takes %f seconds\n' %
-					(container['cost_time'],))
+		context_switch_cost .write('context switch takes %f ms\n' % (container['cost_time']))
 		
 
 
